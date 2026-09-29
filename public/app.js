@@ -1911,17 +1911,18 @@ function drawSlot(ctx, rect, slot, opts, posName) {
       w: Math.max(2, box.width * sx),
       h: Math.max(2, box.height * sy),
     });
+    const hasViolation = (prefix) => f.violations.some((v) => v.code.indexOf(prefix) === 0);
     ctx.save();
     // 出血框：绿 = 落在纸张内，红 = 超出纸张
     const b = map(f.bleedBox);
-    ctx.strokeStyle = f.ok ? '#2f9e44' : '#e03131';
+    ctx.strokeStyle = hasViolation('bleed-overflow') ? '#e03131' : '#2f9e44';
     ctx.lineWidth = 1.4;
     ctx.setLineDash([6, 4]);
     ctx.strokeRect(b.x, b.y, b.w, b.h);
     ctx.setLineDash([]);
-    // 成品页裁切框
+    // 成品页裁切框：蓝 = 落在所属页位内，红 = 越出所属页位
     const t = map(f.trim);
-    ctx.strokeStyle = '#1d4ed8';
+    ctx.strokeStyle = hasViolation('trim-overflow') ? '#e03131' : '#1d4ed8';
     ctx.lineWidth = 1.6;
     ctx.strokeRect(t.x, t.y, t.w, t.h);
     // 安全区框
@@ -2207,7 +2208,7 @@ function buildNotes(input, creep, fit, violations, marks, markOmissions) {
   }
   if (fit && fit.enabled) {
     lines.push({
-      text: `适配检查：纸张 ${formatMm(fit.paperWidth)}×${formatMm(fit.paperHeight)} mm · 页位 ${formatMm(fit.slotWidth)}×${formatMm(fit.slotHeight)} mm · 成品页 ${formatMm(fit.pageWidth)}×${formatMm(fit.pageHeight)} mm · 出血 ${formatMm(fit.bleedMm)} mm · 安全边距 ${formatMm(fit.safetyMm)} mm；蓝框 = 裁切线，绿/红虚框 = 出血范围（红 = 超出纸张），灰点框 = 安全区，红色圆徽 = 页位不适配。`,
+      text: `适配检查：纸张 ${formatMm(fit.paperWidth)}×${formatMm(fit.paperHeight)} mm · 页位 ${formatMm(fit.slotWidth)}×${formatMm(fit.slotHeight)} mm · 成品页 ${formatMm(fit.pageWidth)}×${formatMm(fit.pageHeight)} mm · 出血 ${formatMm(fit.bleedMm)} mm · 安全边距 ${formatMm(fit.safetyMm)} mm；蓝/红实框 = 裁切线（红 = 越出所属页位），绿/红虚框 = 出血范围（红 = 超出纸张），灰点框 = 安全区，红色圆徽 = 页位不适配。`,
     });
     if (violations.length === 0) {
       lines.push({ text: '✓ 本张全部页位适配通过。', color: '#1e7e34' });

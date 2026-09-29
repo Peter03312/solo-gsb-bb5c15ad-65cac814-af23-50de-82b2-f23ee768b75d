@@ -11,7 +11,9 @@
  *   （180° 旋转不改变矩形适配结果，仅随结果返回便于前端展示与核对）。
  *
  * 成品页在页位内居中放置，并叠加爬移偏移 offsetMm（正 = 向右）：
- * - trim     成品页矩形（pageWidth × pageHeight，即裁切线）；
+ * - trim     成品页矩形（pageWidth × pageHeight，即裁切线），必须完整落在所属页位内：
+ *            爬移补偿把裁切框推出左 / 右半张页位、即使仍留在整张纸内，也判该页位
+ *            不适配并给出越界方向与超出量；恰好贴合页位边界（误差内）视为可印；
  * - bleedBox trim 四边各外扩出血 bleed，必须完全落在纸张矩形内
  *            （折线一侧的出血进入相邻页位属正常工艺，仅纸张外边界构成约束）；
  * - safeBox  trim 四边各内缩安全边距 safety；2 × safety 超过成品页宽 / 高时
@@ -127,7 +129,24 @@ function checkSlotFit(rect, opts) {
     height: round4(pageHeight + 2 * bleedMm),
   };
 
-  // 2) 出血框必须完全落在纸张内（折线侧出血进入相邻页位不视为超限）
+  // 2) 裁切框（含爬移偏移）必须完整落在所属页位内：爬移把 trim 推出左 / 右半张
+  //    页位、即使仍留在整张纸内，同样判不适配；恰好贴合页位边界（误差内）视为可印
+  const trimOverflow = [
+    ['left', '左', rect.x - trim.x],
+    ['top', '上', rect.y - trim.y],
+    ['right', '右', trim.x + trim.width - (rect.x + rect.width)],
+    ['bottom', '下', trim.y + trim.height - (rect.y + rect.height)],
+  ];
+  trimOverflow.forEach(([side, label, excess]) => {
+    if (excess > EPS) {
+      violations.push({
+        code: `trim-overflow-${side}`,
+        message: `裁切框${label}侧越出所属页位 ${fmt(excess)}mm（含爬移偏移 ${fmt(offsetMm)}mm）`,
+      });
+    }
+  });
+
+  // 3) 出血框必须完全落在纸张内（折线侧出血进入相邻页位不视为超限）
   const overflow = [
     ['left', '左', -bleedBox.x],
     ['top', '上', -bleedBox.y],
@@ -143,7 +162,7 @@ function checkSlotFit(rect, opts) {
     }
   });
 
-  // 3) 安全区：trim 四边内缩 safety 后须仍然存在
+  // 4) 安全区：trim 四边内缩 safety 后须仍然存在
   const safeW = pageWidth - 2 * safetyMm;
   const safeH = pageHeight - 2 * safetyMm;
   let safeBox = null;

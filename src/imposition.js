@@ -534,7 +534,7 @@ function computeImposition(input) {
   const result = {
     meta: {
       app: 'saddle-stitch-imposition',
-      version: '1.11.0',
+      version: '1.12.0',
       generatedAt: new Date().toISOString(),
     },
     input: {

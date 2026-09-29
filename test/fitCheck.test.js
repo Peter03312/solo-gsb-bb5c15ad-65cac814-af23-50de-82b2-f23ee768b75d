@@ -62,6 +62,12 @@ test('成品页超过页位：报 page-too-wide / page-too-tall，并连带出�
   // 页位 210×297 放不下 215×300，居中后 trim 四边均溢出页位 -> 出血框（bleed=0）超出纸张
   assert.ok(codes.includes('bleed-overflow-left'));
   assert.ok(codes.includes('bleed-overflow-top'));
+  // 裁切框同样越出所属页位（居中后左右各 2.5mm、上下各 1.5mm）
+  assert.ok(codes.includes('trim-overflow-left'));
+  assert.ok(codes.includes('trim-overflow-right'));
+  assert.ok(codes.includes('trim-overflow-top'));
+  assert.ok(codes.includes('trim-overflow-bottom'));
+  assert.match(f.violations.find((v) => v.code === 'trim-overflow-left').message, /越出所属页位 2.5mm/);
   // 超限原因带具体超出量
   assert.match(f.violations.find((v) => v.code === 'page-too-wide').message, /215mm 超过页位可用宽 210mm/);
 });
@@ -99,6 +105,73 @@ test('爬移偏移把出血推出纸张（右装订第 2 张左页位 offset=-1�
   assert.match(v.message, /超出纸张 1mm/);
   // 第 1 张（creep=0）出血框贴边但未超出
   assert.equal(r.signatures[0].sheets[0].front.left.fit.ok, true);
+});
+
+test('爬移把裁切框推出所属页位但仍在整张纸内：判不适配，给出方向与超出量并计入汇总', () => {
+  // 440×310 纸张：页位 220×310，210×297 成品页居中后左右各留 5mm；
+  // 第 2 张爬移 6mm（左装订左页位 +6）：裁切框右缘 221 越出页位 1mm，但出血框（右缘 224）仍在整张纸内
+  const r = computeImposition({
+    ...BASE,
+    paperWidth: 440, paperHeight: 310, pageWidth: 210, pageHeight: 297,
+    bleedMm: 3, paperThickness: 3, maxCompensation: 10,
+  });
+  assert.deepEqual(r.creep.sheetCompensationMm, [0, 6]);
+  const sheet2 = r.signatures[0].sheets[1];
+  assert.equal(sheet2.front.left.offsetMm, 6);
+  const f = sheet2.front.left.fit;
+  assert.equal(f.ok, false);
+  assert.deepEqual(f.trim, { x: 11, y: 6.5, width: 210, height: 297 });
+  const v = f.violations.find((x) => x.code === 'trim-overflow-right');
+  assert.ok(v);
+  assert.match(v.message, /裁切框右侧越出所属页位 1mm/);
+  assert.match(v.message, /含爬移偏移 6mm/);
+  // 出血框仍完全落在整张纸内：不再报出血超限，超限仅来自裁切框越出页位
+  assert.deepEqual(f.violations.map((x) => x.code), ['trim-overflow-right']);
+  // 右页位镜像：裁切框左侧越出页位 1mm；背面页位同样检查
+  assert.ok(sheet2.front.right.fit.violations.some((x) => x.code === 'trim-overflow-left'));
+  assert.ok(sheet2.back.left.fit.violations.some((x) => x.code === 'trim-overflow-right'));
+  assert.ok(sheet2.back.right.fit.violations.some((x) => x.code === 'trim-overflow-left'));
+  // 第 1 张（creep=0）不受影响
+  assert.equal(r.signatures[0].sheets[0].front.left.fit.ok, true);
+  // 计入顶层不适配汇总：第 2 张 4 个页位全部不适配
+  assert.equal(r.fit.ok, false);
+  assert.equal(r.fit.totalSlots, 8);
+  assert.equal(r.fit.failCount, 4);
+});
+
+test('裁切框恰好贴合页位边界视为可印', () => {
+  // 页宽 = 页位宽、页高 = 纸高：裁切框四边与页位边界重合（无爬移）
+  const exact = computeImposition({ ...BASE, paperWidth: 420, paperHeight: 297, pageWidth: 210, pageHeight: 297 });
+  assert.equal(exact.fit.ok, true);
+  assert.equal(exact.fit.failCount, 0);
+  allSlots(exact).forEach((s) => assert.deepEqual(s.fit.violations, []));
+  // 爬移 5mm 时裁切框另一侧恰好贴合页位边界（220 页位放 210 页，居中余量 5mm）
+  const r = computeImposition({
+    ...BASE,
+    paperWidth: 440, paperHeight: 310, pageWidth: 210, pageHeight: 297,
+    paperThickness: 2.5, maxCompensation: 5,
+  });
+  assert.deepEqual(r.creep.sheetCompensationMm, [0, 5]);
+  const f = r.signatures[0].sheets[1].front.left.fit;
+  assert.deepEqual(f.trim, { x: 10, y: 6.5, width: 210, height: 297 }); // 右缘 220 = 页位边界
+  assert.equal(f.ok, true);
+  assert.deepEqual(f.violations, []);
+});
+
+test('出血框越过折线进入相邻页位不视为超限（裁切框仍在所属页位内）', () => {
+  // 200×290 成品页在 220×310 页位内居中，第 2 张爬移 +6mm：
+  // 裁切框右缘 216 仍在页位内，出血框右缘 224 越过折线（x=220）进入右页位，但仍在整张纸内
+  const r = computeImposition({
+    ...BASE,
+    paperWidth: 440, paperHeight: 310, pageWidth: 200, pageHeight: 290,
+    bleedMm: 8, paperThickness: 3, maxCompensation: 10,
+  });
+  const f = r.signatures[0].sheets[1].front.left.fit;
+  assert.equal(f.trim.x + f.trim.width, 216); // ≤ 页位右缘 220
+  assert.ok(f.bleedBox.x + f.bleedBox.width > r.fit.slotWidth); // 出血越过折线进入相邻页位
+  assert.ok(f.bleedBox.x + f.bleedBox.width <= r.fit.paperWidth); // 但仍在整张纸内
+  assert.equal(f.ok, true);
+  assert.deepEqual(f.violations, []);
 });
 
 test('安全边距过大：safety-too-wide / safety-too-tall，safeBox 为 null', () => {
